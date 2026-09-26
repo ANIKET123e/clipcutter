@@ -1,0 +1,206 @@
+// ClipCutter — Prisma schema
+// Run `npx prisma migrate dev --name init` to create the database.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PREMIUM
+}
+
+enum MediaStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  ANALYZING
+  READY
+  FAILED
+  EXPIRED
+  DELETED
+}
+
+enum JobStatus {
+  QUEUED
+  DOWNLOADING
+  ANALYZING
+  PROCESSING
+  UPLOADING
+  COMPLETED
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum CutMode {
+  FAST_COPY
+  FRAME_ACCURATE
+}
+
+enum OutputFormat {
+  MP4
+  WEBM
+  MP3
+  M4A
+  OGG
+  OPUS
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  name            String?
+  role            String    @default("USER") // USER | ADMIN
+  plan            Plan      @default(FREE)
+  apiKeyHash      String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  sessions        Session[]
+  media           Media[]
+  jobs            Job[]
+  clips           Clip[]
+  usage           Usage[]
+  subscription    Subscription?
+
+  @@index([email])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+}
+
+model Media {
+  id             String      @id @default(cuid())
+  userId         String
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  storageKey     String      // object key in S3/R2 for the source file
+  originalName   String
+  mimeType       String
+  fileSize       BigInt
+  status         MediaStatus @default(PENDING_UPLOAD)
+
+  // ffprobe-derived metadata
+  durationSec    Float?
+  width          Int?
+  height         Int?
+  fps            Float?
+  videoCodec     String?
+  audioCodec     String?
+  bitrateKbps    Int?
+  container      String?
+
+  errorMessage   String?
+  expiresAt      DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  jobs           Job[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model Job {
+  id               String       @id @default(cuid())
+  userId           String
+  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mediaId          String
+  media            Media        @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  status           JobStatus    @default(QUEUED)
+  progress         Int          @default(0) // 0-100
+  stage            String?      // human-readable current stage
+
+  startSec         Float
+  endSec           Float
+  cutMode          CutMode
+  outputFormat     OutputFormat
+
+  bullJobId        String?
+  attempts         Int          @default(0)
+
+  errorCategory    String?
+  errorMessage     String?
+
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  clip             Clip?
+
+  @@index([userId])
+  @@index([status])
+  @@index([bullJobId])
+}
+
+model Clip {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId          String       @unique
+  job            Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  storageKey     String
+  format         OutputFormat
+  durationSec    Float
+  width          Int?
+  height         Int?
+  fileSize       BigInt
+  wasReencoded   Boolean      // true = "Frame Accurate", false = "No Re-Encoding"
+
+  downloadCount  Int          @default(0)
+  expiresAt      DateTime
+  deletedAt      DateTime?
+
+  createdAt      DateTime     @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Usage {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day            DateTime // truncated to day, for daily quota counting
+  jobsCreated    Int      @default(0)
+  bytesUploaded  BigInt   @default(0)
+  bytesProcessed BigInt   @default(0)
+
+  @@unique([userId, day])
+}
+
+model Subscription {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  plan                 Plan     @default(FREE)
+  stripeCustomerId     String?  @unique
+  stripeSubscriptionId String?  @unique
+  status               String   @default("inactive") // active | past_due | canceled | inactive
+  currentPeriodEnd     DateTime?
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}

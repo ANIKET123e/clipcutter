@@ -1,0 +1,61 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "ClipCutter API", "version": "1.0.0", "description": "Programmatic access to ClipCutter. Authenticate with an API key via the X-API-Key header, or a session cookie for browser use." },
+  "servers": [{ "url": "https://your-domain.example/api" }],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": { "type": "apiKey", "in": "header", "name": "X-API-Key" }
+    },
+    "schemas": {
+      "Error": { "type": "object", "properties": { "error": { "type": "string" }, "category": { "type": "string" } } }
+    }
+  },
+  "security": [{ "ApiKeyAuth": [] }],
+  "paths": {
+    "/media/upload": {
+      "post": {
+        "summary": "Start a direct-to-storage upload",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "fileName": { "type": "string" }, "mimeType": { "type": "string" }, "fileSize": { "type": "integer" } }, "required": ["fileName", "mimeType", "fileSize"] } } }
+        },
+        "responses": {
+          "200": { "description": "Signed upload URL issued", "content": { "application/json": { "schema": { "type": "object", "properties": { "mediaId": { "type": "string" }, "uploadUrl": { "type": "string" } } } } } },
+          "413": { "description": "File exceeds your plan's size limit", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/media/complete": {
+      "post": {
+        "summary": "Mark an upload complete and start ffprobe analysis",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "mediaId": { "type": "string" } }, "required": ["mediaId"] } } } },
+        "responses": { "200": { "description": "Analysis started" } }
+      }
+    },
+    "/media/{id}": {
+      "get": { "summary": "Get media metadata and analysis status", "responses": { "200": { "description": "Media details" }, "404": { "description": "Not found" } } },
+      "delete": { "summary": "Delete a source video", "responses": { "200": { "description": "Deleted" } } }
+    },
+    "/jobs": {
+      "post": {
+        "summary": "Create a clip job",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "mediaId": { "type": "string" }, "startSec": { "type": "number" }, "endSec": { "type": "number" }, "cutMode": { "type": "string", "enum": ["FAST_COPY", "FRAME_ACCURATE"] }, "outputFormat": { "type": "string", "enum": ["MP4", "WEBM", "MP3", "M4A", "OGG", "OPUS"] } }, "required": ["mediaId", "startSec", "endSec", "cutMode", "outputFormat"] } } }
+        },
+        "responses": {
+          "200": { "description": "Job queued" },
+          "429": { "description": "Rate limited or over your daily job quota", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/jobs/{id}": { "get": { "summary": "Get full job details", "responses": { "200": { "description": "Job details" } } } },
+    "/jobs/{id}/status": { "get": { "summary": "Lightweight polling endpoint for job status", "responses": { "200": { "description": "Status snapshot" } } } },
+    "/jobs/{id}/stream": { "get": { "summary": "Server-Sent Events stream of job progress", "responses": { "200": { "description": "text/event-stream of progress updates" } } } },
+    "/jobs/{id}/cancel": { "post": { "summary": "Cancel a queued or in-progress job", "responses": { "200": { "description": "Cancelled" } } } },
+    "/clips/{id}": {
+      "get": { "summary": "Get clip details and a fresh signed download URL", "responses": { "200": { "description": "Clip details with downloadUrl" }, "410": { "description": "Clip has expired" } } },
+      "delete": { "summary": "Delete a clip", "responses": { "200": { "description": "Deleted" } } }
+    }
+  }
+}
